@@ -45,6 +45,7 @@ typedef struct {
     char *cardname;
 
     snd_pcm_t *handle;
+    snd_pcm_hw_params_t *hwparams;
 
     // Configurable parameters
     int channels;
@@ -350,6 +351,23 @@ static int alsapcm_setup(alsapcm_t *self)
     return res;
 }
 
+static int setup_pcm_parameters(alsapcm_t *self)
+{
+    snd_pcm_hw_params_malloc(&(self->hw_params));
+
+    res = snd_pcm_set_params(self->handle, self->format,
+                             SND_PCM_ACCESS_RW_INTERLEAVED,
+                             self->channels, self->rate, self->soft_resampling,
+                             self->latency);
+    if (res) {
+        PyErr_Format(ALSAAudioError, "%s [%s]", snd_strerror(res), device);
+    }
+
+    snd_pcm_hw_params_current(self->handle, self->hwparams);
+    self->framesize = self->channels * snd_pcm_hw_params_get_sbits(self->hwparams) / 8;
+    snd_pcm_hw_params_get_period_size(self->hwparams, &self->periodsize, 0);
+}
+
 static PyObject *
 alsapcm_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
@@ -360,13 +378,20 @@ alsapcm_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     int pcmmode = 0;
     char *device = "default";
     char *card = NULL;
+    unsigned int rate = 48000;
+    unsigned int latency = 0;
+    snd_pcm_format_t format = SND_PCM_FORMAT_S16_LE;
+    unsigned int channels = 2;
+    unsigned int soft_resampling_mode = 1;
     int cardidx = -1;
     char hw_device[128];
-    char *kw[] = { "type", "mode", "device", "cardindex", "card", NULL };
+    char *kw[] = { "type", "mode", "device", "cardindex", "card",
+                   "rate", "latency", "fmt", "channels", NULL };
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|Oisiz", kw,
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|Oisiziiii", kw,
                                      &pcmtypeobj, &pcmmode, &device,
-                                     &cardidx, &card))
+                                     &cardidx, &card, &rate, &latency, &format,
+                                     &channels, &soft_resampling_mode))
         return NULL;
 
     if (cardidx >= 0) {
@@ -410,18 +435,17 @@ alsapcm_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     self->handle = 0;
     self->pcmtype = pcmtype;
     self->pcmmode = pcmmode;
-    self->channels = 2;
-    self->rate = 44100;
-    self->format = SND_PCM_FORMAT_S16_LE;
-    self->periodsize = 32;
+    self->channels = channels;
+    self->rate = rate;
+    self->format = format;
 
     res = snd_pcm_open(&(self->handle), device, self->pcmtype,
                        self->pcmmode);
 
     if (res >= 0) {
-        res = alsapcm_setup(self);
+        snd_pcm_hw_params_malloc(&(self->hw_params));
     }
-    
+
     if (res >= 0) {
         self->cardname = strdup(device);
     }
@@ -640,7 +664,7 @@ alsapcm_setchannels(alsapcm_t *self, PyObject *args)
 {
     int channels, saved;
     int res;
-    
+
     if (!PyArg_ParseTuple(args,"i:setchannels", &channels))
         return NULL;
 
@@ -744,7 +768,7 @@ alsapcm_setperiodsize(alsapcm_t *self, PyObject *args)
     if (!PyArg_ParseTuple(args,"i:setperiodsize", &periodsize))
         return NULL;
 
-    
+
     if (!self->handle)
     {
         PyErr_SetString(ALSAAudioError, "PCM device is closed");
@@ -760,8 +784,8 @@ alsapcm_setperiodsize(alsapcm_t *self, PyObject *args)
         PyErr_Format(ALSAAudioError, "%s [%s]", snd_strerror(res),
                      self->cardname);
 
-        
-        
+
+
         return NULL;
     }
 
