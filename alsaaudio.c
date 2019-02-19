@@ -357,11 +357,10 @@ static int setup_pcm_parameters(alsapcm_t *self)
 
     res = snd_pcm_set_params(self->handle, self->format,
                              SND_PCM_ACCESS_RW_INTERLEAVED,
-                             self->channels, self->rate, self->soft_resampling,
+                             self->channels, self->rate, 1,
                              self->latency);
-    if (res) {
-        PyErr_Format(ALSAAudioError, "%s [%s]", snd_strerror(res), device);
-    }
+    if (res)
+        return res
 
     snd_pcm_hw_params_current(self->handle, self->hwparams);
     self->framesize = self->channels * snd_pcm_hw_params_get_sbits(self->hwparams) / 8;
@@ -382,7 +381,6 @@ alsapcm_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     unsigned int latency = 0;
     snd_pcm_format_t format = SND_PCM_FORMAT_S16_LE;
     unsigned int channels = 2;
-    unsigned int soft_resampling_mode = 1;
     int cardidx = -1;
     char hw_device[128];
     char *kw[] = { "type", "mode", "device", "cardindex", "card",
@@ -444,6 +442,7 @@ alsapcm_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 
     if (res >= 0) {
         snd_pcm_hw_params_malloc(&(self->hw_params));
+        res = setup_pcm_parameters(self)
     }
 
     if (res >= 0) {
